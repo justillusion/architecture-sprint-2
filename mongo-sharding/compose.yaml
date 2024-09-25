@@ -1,0 +1,131 @@
+name: 'mongo-sharding'
+services:
+  # сервер конфигурации
+  configSrv:
+    # docker образ
+    image: dh-mirror.gitverse.ru/mongo:latest
+    container_name: configSrv 
+    restart: always
+    ports:
+      - "27017:27017"
+    networks:
+      app-network:
+    volumes:
+      - config-data:/data/db
+    command:
+      [
+        # запуск в режиме конфигурации
+        "--configsvr",
+        "--replSet",
+        "config_server",
+        "--bind_ip_all",
+        "--port",
+        "27017"
+      ]
+    healthcheck:
+      test: [ "CMD", "mongo", "--eval", "db.adminCommand('ping')" ]
+      interval: 5s
+      start_period: 10s
+
+  # шард 1
+  shard1:
+    image: dh-mirror.gitverse.ru/mongo:latest
+    container_name: shard1
+    restart: always
+    ports:
+      - "27018:27018"
+    volumes:
+      - shard1-data:/data/db
+    networks:
+      app-network:
+    command:
+      [
+        # запуск в режиме шардинга
+        "--shardsvr", 
+        "--replSet",
+        "shard1",
+        "--bind_ip_all", 
+        "--port",
+        "27018"
+      ]
+    healthcheck:
+      test: [ "CMD", "mongo", "--eval", "db.adminCommand('ping')" ]
+      interval: 5s
+      start_period: 10s
+
+  shard2:
+    image: dh-mirror.gitverse.ru/mongo:latest
+    container_name: shard2
+    restart: always
+    ports:
+      - "27019:27019"
+    volumes:
+      - shard2-data:/data/db
+    networks:
+      app-network:
+    command:
+      [
+        # запуск в режиме шардинга
+        "--shardsvr", 
+        "--replSet",
+        "shard2",
+        "--bind_ip_all", 
+        "--port",
+        "27019"
+      ]
+    healthcheck:
+      test: [ "CMD", "mongo", "--eval", "db.adminCommand('ping')" ]
+      interval: 5s
+      start_period: 10s
+
+  # роутер
+  mongos_router:
+    image: dh-mirror.gitverse.ru/mongo:latest
+    container_name: mongos_router
+    restart: always
+    ports:
+      - "27020:27020"
+    networks:
+      app-network:
+    command:
+      [
+        # запуск в режиме роутера
+        "mongos", 
+        "--configdb", 
+         #передача данных сервера конфигурации
+        "config_server/configSrv:27017",
+        "--bind_ip_all",
+        "--port",
+        "27020"
+      ]
+    healthcheck:
+      test: [ "CMD", "mongo", "--eval", "db.adminCommand('ping')" ]
+      interval: 5s
+      start_period: 10s
+
+  pymongo_api:
+    container_name: pymongo_api
+    build: 
+      context: api_app
+      dockerfile: Dockerfile
+    image: kazhem/pymongo_api:1.0.0
+    depends_on:
+      - shard1
+      - shard2
+      - configSrv
+      - mongos_router
+    ports:
+      - 8080:8080
+    environment:
+      MONGODB_URL: "mongodb://mongos_router"
+      MONGODB_DATABASE_NAME: "somedb"
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  config-data:
+  shard1-data:
+  shard2-data:
+  
